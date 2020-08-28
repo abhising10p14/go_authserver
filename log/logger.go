@@ -61,6 +61,9 @@ const (
   SECU_LOG_DISABLED = false
 )
 
+const (
+  LOG_MAX_SIZE_PER_FILE = 200 * 1024 *1024
+)
 var loggingEnabled LogState = LOG_ENABLED
 var defaultModule = "default"
 var log = logging.MustGetLoger(defaultModule)
@@ -107,5 +110,73 @@ func SetupLogger(logState LogState, level LogLevel, dirName string, processName 
   if loggingEnabled {
     // Logging Output destination handlers
     var stdoutBackendLeveled, fileBackendLeveled logging.LeveledBackend
+    if logOutput == LO_SCREEN || logOutput == LO_BOTH || logOutput == LO_ALL {
+      stdoutBackendLeveled = getLeveledBackend(os.Stdout, "", 0, format, level)
+    }
+
+    // Create and initialize file o/p handler
+    if logOutput == LO_FILE || logOutput == LO_BOTH || logOutput == LO_ALL {
+      if _, err := os.STAT(dirName); os.IsNotExist(err) {
+        err := os.MkdirAll(dirName, 0755)
+        if err != nil{
+          fmt.Errorf("MkdirAll dirName:%q Error: %s Failed to setup logger. \n", dirName, err.Error())
+          return false
+        }
+      }
+
+      rotateWriter, err :=  NewRotateWriter(dirName, processName, "Log-", LOG_MAX_SIZE_PER_FILE)
+      if err != nil{
+        fmt.Errorf("OpenFile filePath:%s/%s Error: %s Failed to setup logger. \n", dirName, processName, err.Error())
+        return false
+      } else {
+        fileBackendLeveled  = getLeveledBackend(rotateWriter,"",0,format,level)
+      }
+    }
+
+    if logOutput == LO_BOTH || logOutput == LO_ALL {
+      logging.SetBackend(stdoutBackendLeveled,fileBackendLeveled)
+    } else if logOutput == LO_SCREEN {
+      logging.SetBackend(stdoutBackendLeveled)
+    } else if logOutput == LO_FILE {
+      logging.SetBackend(fileBackendLeveled)
+    }else {
+      fmt.Errorf("loggign backend configuration failed!!!\n")
+      return false
+    }
   }
+  fmt.Printf("Logging backend cxonfiguration successful!!!!\n")
+  return true
+}
+
+// Function to get logging backend for given input
+func getLeveledBackend(file io.Writer, prefix string, flag int, format logging.Formatter, level int) (logging.LeveledBackend) {
+  backend := logging.NewLogBackend(file, prefix, flag)
+  leveledBackendFormatter := logging.NewBackendFormatter(backend, format)
+  leveledBackend := logging.AddModuleLevel(leveledBackendFormatter)
+  leveledBackend.SetLevel(getLoggerLibSpecificLevel(level),"")
+  return leveledBackend
+}
+
+// Get Log Level specific to the underlying library for passed in custom Log Level
+func getLoggerLibSpecificLevel(level LogLevel) logging.Level {
+  var specificLogLevel logging.Level
+  switch level {
+  case LL_NONE:
+    specificLogLevel = logging.ERROR
+  case LL_WARNING:
+    specificLogLevel = logging.WARNING
+  case LL_ERROR:
+    specificLogLevel = logging.ERROR
+  case LL_INFO:
+    specificLogLevel = logging.INFO
+  case LL_DEBUG:
+    specificLogLevel = logging.DEBUG
+  case LL_TRACE:
+    specificLogLevel = logging.DEBUG
+  case LL_ALL:
+    specificLogLevel = logging.DEBUG
+  default:
+    specificLogLevel = logging.ERROR
+  }
+  return specificLogLevel
 }
